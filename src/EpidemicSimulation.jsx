@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Activity, TrendingUp } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush } from 'recharts';
 
 const EpidemicSimulation = () => {
   const canvasRef = useRef(null);
@@ -24,7 +24,8 @@ const EpidemicSimulation = () => {
     infected: 0,
     recovered: 0,
     dead: 0,
-    rValue: 0
+    r0Value: 0,  // R₀ from initial infections
+    rtValue: 0   // R_t current average
   });
 
   const [chartData, setChartData] = useState([]);
@@ -272,20 +273,32 @@ const EpidemicSimulation = () => {
       else if (p.status === 'dead') dead++;
     });
 
-    // Calculate R value - FIXED VERSION
-    // Hitung untuk semua yang pernah terinfeksi (tidak hanya recovered/dead)
-    const everInfected = people.filter(p => 
-      p.infectedTime !== null && // pernah terinfeksi
-      (p.status === 'recovered' || p.status === 'dead' || p.status === 'quarantined')
+    // Calculate R₀ (only from initial infected individuals)
+    let r0Value = 0;
+    const initialInfections = people.filter(p => 
+      p.id < initialInfected && // only initial infected
+      p.infectedTime !== null &&
+      (p.status === 'recovered' || p.status === 'dead')
     );
     
-    let rValue = 0;
-    if (everInfected.length > 0) {
-      const totalInfectionsSpread = everInfected.reduce((sum, p) => sum + p.infectionsSpread, 0);
-      rValue = (totalInfectionsSpread / everInfected.length).toFixed(2);
+    if (initialInfections.length > 0) {
+      const totalInitialSpread = initialInfections.reduce((sum, p) => sum + p.infectionsSpread, 0);
+      r0Value = (totalInitialSpread / initialInfections.length).toFixed(2);
     }
 
-    setStats({ healthy, infected: infected + quarantined, recovered, dead, rValue });
+    // Calculate R_t (all completed infections)
+    const completedInfections = people.filter(p => 
+      p.infectedTime !== null &&
+      (p.status === 'recovered' || p.status === 'dead')
+    );
+    
+    let rtValue = 0;
+    if (completedInfections.length > 0) {
+      const totalInfectionsSpread = completedInfections.reduce((sum, p) => sum + p.infectionsSpread, 0);
+      rtValue = (totalInfectionsSpread / completedInfections.length).toFixed(2);
+    }
+
+    setStats({ healthy, infected: infected + quarantined, recovered, dead, r0Value, rtValue });
 
     // Update chart every 500ms
     if (sim.time % 500 < deltaTime) {
@@ -297,7 +310,17 @@ const EpidemicSimulation = () => {
         Terinfeksi: infected,
         Sembuh: recovered,
         Meninggal: dead
-      }].slice(-50)); // Keep last 50 points
+      }]); // Keep all data points for historical view
+      
+      // Track R_t over time
+      if (completedInfections.length > 0) {
+        setRtData(prev => [...prev, {
+          time: (sim.time / 1000).toFixed(1),
+          Rt: parseFloat(rtValue),
+          R0: parseFloat(r0Value) || 0,
+          Threshold: 1
+        }]);
+      }
     }
   };
 
@@ -401,6 +424,7 @@ const EpidemicSimulation = () => {
 
   const resetSimulation = () => {
     setIsRunning(false);
+    setRtData([]); // Clear R_t data
     initializeSimulation();
     drawSimulation();
   };
@@ -433,8 +457,8 @@ const EpidemicSimulation = () => {
                 <TrendingUp className="w-5 h-5 mr-2" />
                 Grafik Penyebaran
               </h3>
-              <ResponsiveContainer width="100%" height={200}>
-                <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="time" stroke="#94a3b8" label={{ value: 'Waktu (detik)', position: 'insideBottom', offset: -5 }} />
                   <YAxis stroke="#94a3b8" />
@@ -449,6 +473,30 @@ const EpidemicSimulation = () => {
                   <Line type="monotone" dataKey="Terinfeksi" stroke="#ef4444" strokeWidth={2} dot={false} isAnimationActive={false} />
                   <Line type="monotone" dataKey="Sembuh" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
                   <Line type="monotone" dataKey="Meninggal" stroke="#64748b" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Brush dataKey="time" height={30} stroke="#64748b" fill="#1e293b" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* R_t Chart */}
+            <div className="bg-slate-800 rounded-lg p-4 shadow-2xl">
+              <h3 className="text-lg font-semibold mb-3 flex items-center">
+                📈 Grafik Reproduction Number
+              </h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={rtData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="time" stroke="#94a3b8" label={{ value: 'Waktu (detik)', position: 'insideBottom', offset: -5 }} />
+                  <YAxis stroke="#94a3b8" domain={[0, 'auto']} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155' }}
+                    labelStyle={{ color: '#94a3b8' }}
+                  />
+                  <Legend />
+                  <Line type="monotone" dataKey="R0" stroke="#a855f7" strokeWidth={3} dot={false} isAnimationActive={false} name="R₀ (Initial)" strokeDasharray="5 5" />
+                  <Line type="monotone" dataKey="Rt" stroke="#f59e0b" strokeWidth={2} dot={false} isAnimationActive={false} name="R_t (Current)" />
+                  <Line type="monotone" dataKey="Threshold" stroke="#64748b" strokeWidth={1} dot={false} isAnimationActive={false} name="R=1 (Threshold)" strokeDasharray="3 3" />
+                  <Brush dataKey="time" height={30} stroke="#64748b" fill="#1e293b" />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -625,8 +673,12 @@ const EpidemicSimulation = () => {
                   <span className="font-bold">{stats.dead}</span>
                 </div>
                 <div className="flex justify-between items-center bg-purple-900/30 p-2 rounded border-2 border-purple-500">
-                  <span className="text-sm font-semibold">R₀ Value</span>
-                  <span className="font-bold text-lg">{stats.rValue}</span>
+                  <span className="text-sm font-semibold">R₀ (Initial)</span>
+                  <span className="font-bold text-lg">{stats.r0Value || '...'}</span>
+                </div>
+                <div className="flex justify-between items-center bg-amber-900/30 p-2 rounded border-2 border-amber-500">
+                  <span className="text-sm font-semibold">R_t (Current)</span>
+                  <span className="font-bold text-lg">{stats.rtValue}</span>
                 </div>
               </div>
             </div>
@@ -635,15 +687,17 @@ const EpidemicSimulation = () => {
             <div className="bg-slate-800 rounded-lg p-4 shadow-2xl">
               <h3 className="text-sm font-semibold mb-2">ℹ️ Informasi</h3>
               <p className="text-xs text-gray-300 leading-relaxed">
-                <strong>R₀ (Basic Reproduction Number)</strong>: Rata-rata jumlah orang yang terinfeksi oleh satu orang yang terinfeksi.
+                <strong>R₀ (Basic Reproduction Number)</strong>: Rata-rata penyebaran dari infeksi <strong>awal</strong> (patient zero).
                 <br/><br/>
-                • R₀ {'<'} 1: Epidemi akan mereda
-                <br/>
-                • R₀ = 1: Stabil
-                <br/>
-                • R₀ {'>'} 1: Epidemi akan menyebar
+                <strong>R_t (Effective Reproduction Number)</strong>: Rata-rata penyebaran <strong>saat ini</strong> dari semua kasus yang sudah selesai.
                 <br/><br/>
-                Simulasi menggunakan <strong>metode Monte Carlo</strong> untuk menentukan kontak antar individu, probabilitas infeksi, dan hasil pemulihan secara acak.
+                • R {'<'} 1: Epidemi akan mereda
+                <br/>
+                • R = 1: Stabil
+                <br/>
+                • R {'>'} 1: Epidemi akan menyebar
+                <br/><br/>
+                R_t biasanya menurun seiring waktu karena berkurangnya populasi yang rentan (susceptible).
               </p>
             </div>
           </div>
@@ -652,7 +706,7 @@ const EpidemicSimulation = () => {
         <div className="mt-4 bg-slate-800 rounded-lg p-3 shadow-2xl">
           <p className="text-xs text-gray-400">
             💡 <strong>Tips:</strong> Coba ubah tingkat infeksi dan mobilitas untuk melihat bagaimana parameter mempengaruhi penyebaran penyakit. 
-            Perhatikan nilai R₀ untuk memahami seberapa cepat penyakit menyebar dalam populasi!
+            Perhatikan perbedaan R₀ (konstan dari patient zero) dan R_t (berubah seiring waktu) untuk memahami dinamika epidemi!
           </p>
         </div>
       </div>
