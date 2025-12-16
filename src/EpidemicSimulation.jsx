@@ -59,6 +59,7 @@ const EpidemicSimulation = () => {
         asymptomatic: false,
         infectionRadius: 8 + Math.random() * 4, // 8-12 px
         personalRecovery: recoveryTime * (0.7 + Math.random() * 0.6), // 0.7x - 1.3x
+        oldRecoveryTime: recoveryTime, // Track previous recovery time for updates
         immunityEndTime: null,
         infectedBy: null,
         infectionsSpread: 0
@@ -81,9 +82,41 @@ const EpidemicSimulation = () => {
     }]);
   };
 
+  // Update simulation parameters without changing positions
+  const updateSimulationParameters = () => {
+    const sim = simulationRef.current;
+    if (sim.people.length === 0) return;
+
+    sim.people.forEach(person => {
+      // Update personal recovery time based on current recoveryTime parameter
+      // The original personalRecovery was: recoveryTime * (0.7 + Math.random() * 0.6)
+      // Which means it ranges from recoveryTime * 0.7 to recoveryTime * 1.3
+      // Extract the multiplier (0.7 to 1.3) by dividing by the old recoveryTime
+      
+      // Get the multiplier from the stored recovery time
+      if (person.oldRecoveryTime && person.oldRecoveryTime > 0) {
+        const multiplier = person.personalRecovery / person.oldRecoveryTime;
+        person.personalRecovery = recoveryTime * multiplier;
+      } else {
+        // Fallback: assume it's between 0.7 and 1.3
+        const multiplier = person.personalRecovery / 5000; // assuming default was around 5000
+        person.personalRecovery = recoveryTime * multiplier;
+      }
+      
+      person.oldRecoveryTime = recoveryTime; // Store for next update
+    });
+  };
+
   useEffect(() => {
     initializeSimulation();
   }, [populationSize, initialInfected]);
+
+  // Update parameters when simulation is running without reinitializing
+  useEffect(() => {
+    if (simulationRef.current.people.length > 0) {
+      updateSimulationParameters();
+    }
+  }, [recoveryTime, immunityDuration, quarantineDelay]);
 
   // Monte Carlo: Check if infection occurs
   const attemptInfection = (person1, person2) => {
@@ -114,7 +147,7 @@ const EpidemicSimulation = () => {
 
   // Monte Carlo: Determine outcome (recovery or death)
   const determineOutcome = (person, overCapacity) => {
-    const baseMortality = person.ageGroup === 'child' ? 0.005 : person.ageGroup === 'adult' ? 0.015 : 0.05;
+    const baseMortality = person.ageGroup === 'child' ? 0.2 : person.ageGroup === 'adult' ? 0.05 : 0.2;
     const mortalityRate = baseMortality * (overCapacity ? 1.5 : 1.0);
     if (Math.random() < mortalityRate) {
       person.status = 'dead';
@@ -122,7 +155,7 @@ const EpidemicSimulation = () => {
       person.vy = 0;
     } else {
       person.status = 'recovered';
-      person.immunityEndTime = simulationRef.current.time + immunityDuration;
+      person.immunityEndTime = simulationRef.current.time + (person.immunityDurationRef || immunityDuration);
     }
   };
 
@@ -183,7 +216,7 @@ const EpidemicSimulation = () => {
       }
 
       // Move infected to quarantined after delay
-      if (person.status === 'infected' && sim.time - person.infectedTime > quarantineDelay) {
+      if (person.status === 'infected' && sim.time - person.infectedTime > (person.quarantineDelayRef || quarantineDelay)) {
         person.status = 'quarantined';
         // Reduce movement immediately
         person.vx = 0;
@@ -496,7 +529,7 @@ const EpidemicSimulation = () => {
                   <input
                     type="range"
                     min="2000"
-                    max="10000"
+                    max="20000"
                     step="1000"
                     value={recoveryTime}
                     onChange={(e) => setRecoveryTime(parseInt(e.target.value))}
@@ -536,7 +569,7 @@ const EpidemicSimulation = () => {
                   <input
                     type="range"
                     min="0"
-                    max="10000"
+                    max="25000"
                     step="500"
                     value={quarantineDelay}
                     onChange={(e) => setQuarantineDelay(parseInt(e.target.value))}
