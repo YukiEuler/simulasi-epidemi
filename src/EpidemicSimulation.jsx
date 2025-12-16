@@ -261,22 +261,31 @@ const EpidemicSimulation = () => {
     }
 
     // Update statistics
-    let healthy = 0, exposed = 0, asymptomatic = 0, infected = 0, recovered = 0, dead = 0;
+    let healthy = 0, exposed = 0, asymptomatic = 0, infected = 0, quarantined = 0, recovered = 0, dead = 0;
     people.forEach(p => {
       if (p.status === 'healthy') healthy++;
       else if (p.status === 'exposed') exposed++;
       else if (p.status === 'asymptomatic') asymptomatic++;
       else if (p.status === 'infected') infected++;
+      else if (p.status === 'quarantined') quarantined++;
       else if (p.status === 'recovered') recovered++;
       else if (p.status === 'dead') dead++;
     });
 
-    // Calculate R value (average infections per person)
-    const recoveredAndDead = people.filter(p => p.status === 'recovered' || p.status === 'dead');
-    const totalInfectionsSpread = recoveredAndDead.reduce((sum, p) => sum + p.infectionsSpread, 0);
-    const rValue = recoveredAndDead.length > 0 ? (totalInfectionsSpread / recoveredAndDead.length).toFixed(2) : 0;
+    // Calculate R value - FIXED VERSION
+    // Hitung untuk semua yang pernah terinfeksi (tidak hanya recovered/dead)
+    const everInfected = people.filter(p => 
+      p.infectedTime !== null && // pernah terinfeksi
+      (p.status === 'recovered' || p.status === 'dead' || p.status === 'quarantined')
+    );
+    
+    let rValue = 0;
+    if (everInfected.length > 0) {
+      const totalInfectionsSpread = everInfected.reduce((sum, p) => sum + p.infectionsSpread, 0);
+      rValue = (totalInfectionsSpread / everInfected.length).toFixed(2);
+    }
 
-    setStats({ healthy, infected, recovered, dead, rValue });
+    setStats({ healthy, infected: infected + quarantined, recovered, dead, rValue });
 
     // Update chart every 500ms
     if (sim.time % 500 < deltaTime) {
